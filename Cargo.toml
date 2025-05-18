@@ -1,0 +1,33 @@
+[package]
+name = "zerg_pool"
+version = "0.1.0"
+edition = "2021"
+authors = ["0ldm0s <oldmos@gmail.com>"]
+description = "High-performance thread pool with event loop integration"
+license = "WTFPL"
+repository = "https://github.com/0ldm0s/zerg_pool"
+
+[dependencies]
+mio = { version = "0.8", features = ["os-poll", "net"] }
+log = "0.4"
+env_logger = "0.10"  # 添加日志输出支持
+crossbeam = "0.8"
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync"] }
+futures = "0.3"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+[target.'cfg(unix)'.dependencies]
+socket2 = "0.5"
+nix = "0.27"  # Unix系统调用封装
+libc = "0.2"  # Unix底层接口
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+criterion = "0.4"
+
+[[bench]]
+name = "benchmark"
+harness = false
