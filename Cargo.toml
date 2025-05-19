@@ -8,6 +8,7 @@ license = "WTFPL"
 repository = "https://github.com/0ldm0s/zerg_pool"
 
 [dependencies]
+once_cell = "1.18"
 mio = { version = "0.8", features = ["os-poll", "net"] }
 log = "0.4"
 env_logger = "0.10"  # 添加日志输出支持
@@ -18,6 +19,13 @@ parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = "1.3"
+rand = "0.9.1"
+zmq = "0.9"
+prost-derive = "0.11"
+prost = "0.11"
+
+[build-dependencies]
+prost-build = "0.11"
 
 [target.'cfg(unix)'.dependencies]
 socket2 = "0.5"
@@ -27,6 +35,8 @@ libc = "0.2"  # Unix底层接口
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 criterion = "0.4"
+log = "0.4"
+env_logger = "0.10"
 
 [[bench]]
 name = "benchmark"

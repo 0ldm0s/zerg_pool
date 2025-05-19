@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package zerg.pool;
+
+// 任务消息定义
+message Task {
+  string id = 1;          // 任务唯一ID
+  bytes payload = 2;      // 任务负载数据
+  int64 timestamp = 3;    // 任务创建时间戳
+}
+
+// 响应消息定义
+message Response {
+  string worker_id = 1;   // 工作节点ID
+  oneof result {
+    bytes output = 2;     // 成功时的输出
+    string error = 3;     // 失败时的错误信息
+  }
+}
+
+// 工作节点注册消息
+message Registration {
+  string worker_id = 1;   // 工作节点ID
+  repeated string capabilities = 2; // 支持的能力列表
+}
+
+// 心跳消息
+message Heartbeat {
+  string worker_id = 1;   // 工作节点ID
+  int64 timestamp = 2;    // 心跳时间戳
+}
