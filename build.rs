@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 获取项目根目录绝对路径
@@ -8,11 +8,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = manifest_dir.join("proto");
     let out_dir = manifest_dir.join("src/proto");
 
-    // 确保输出目录存在
-    std::fs::create_dir_all(&out_dir)?;
-
     // 清理旧文件
     let _ = std::fs::remove_file(out_dir.join("zerg.pool.rs"));
+
+    // 确保输出目录存在
+    std::fs::create_dir_all(&out_dir)?;
 
     // 强制设置输出文件名为zergpool.rs
     let mut config = prost_build::Config::new();
@@ -30,7 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 创建mod.rs文件
     std::fs::write(
         manifest_dir.join("src/proto/mod.rs"),
-        "pub mod zergpool;\n"
+        "pub mod zergpool;\n\n\
+        pub use zergpool::{Task, Response, response};\n"
     )?;
 
     // 重新编译当proto文件变化时

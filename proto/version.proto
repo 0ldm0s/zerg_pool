@@ -1,0 +1,8 @@
+syntax = "proto3";
+package zerg;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.FileOptions {
+  string protocol_version = 50000;
+}

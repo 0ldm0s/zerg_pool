@@ -1,12 +1,25 @@
 syntax = "proto3";
 
 package zerg.pool;
+import "version.proto";
+
+option (zerg.protocol_version) = "2.0.0";
+
+// 响应状态枚举
+enum Status {
+  SUCCESS = 0;    // 成功
+  FAILURE = 1;    // 失败
+  PROCESSING = 2; // 处理中
+  TIMEOUT = 3;    // 超时
+}
 
 // 任务消息定义
 message Task {
   string id = 1;          // 任务唯一ID
   bytes payload = 2;      // 任务负载数据
-  int64 timestamp = 3;    // 任务创建时间戳
+  int64 timestamp = 3;    // 任务创建时间戳（保持原位置）
+  map<string, string> metadata = 4; // 任务元数据
+  optional uint32 priority = 5; // 任务优先级（1-10）
 }
 
 // 响应消息定义
@@ -20,8 +33,10 @@ message Response {
 
 // 工作节点注册消息
 message Registration {
-  string worker_id = 1;   // 工作节点ID
-  repeated string capabilities = 2; // 支持的能力列表
+  string worker_id = 1;    // 工作节点ID
+  int32 max_threads = 2;   // 最大线程数（根据CPU核心数）
+  string version = 3;      // 节点版本（CARGO_PKG_VERSION）
+  repeated string capabilities = 4; // 扩展能力列表
 }
 
 // 心跳消息
