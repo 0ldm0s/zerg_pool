@@ -1,5 +1,7 @@
 //! Queen模块实现 - 严格遵循docs/架构设计.md规范
 
+pub mod network;
+
 use std::collections::HashMap;
 use std::time::SystemTime;
 use super::RegistrationError;

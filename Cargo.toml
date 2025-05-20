@@ -28,6 +28,7 @@ prost-derive = "0.11"
 prost = "0.11"
 thiserror = "2.0.12"
 protobuf = "3.7.2"
+bytes = "1.0"
 
 [build-dependencies]
 prost-build = "0.11"

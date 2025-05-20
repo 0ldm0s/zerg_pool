@@ -27,3 +27,5 @@ pub enum RegistrationError {
 // 公开导出模块的公共接口
 pub use queen::DronePool;
 pub use drone::heartbeat::HeartbeatManager;
+pub use drone::network::DroneNetwork;
+pub use queen::network::HiveNetwork;
