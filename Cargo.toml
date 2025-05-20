@@ -13,7 +13,7 @@ mio = { version = "1.0", features = ["os-poll", "net"] }
 log = "0.4"
 env_logger = "0.10"  # 添加日志输出支持
 crossbeam = "0.8"
-tokio = { version = "1.0", features = ["rt-multi-thread", "sync"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync", "time"] }
 futures = "0.3"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
