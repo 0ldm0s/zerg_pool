@@ -10,6 +10,14 @@ use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
 use prost::Message;
 use std::env;
 use std::thread;
+use std::sync::OnceLock;
+
+static WORKER_ID: OnceLock<String> = OnceLock::new();
+
+/// 获取当前worker ID
+pub fn get_worker_id() -> Option<&'static String> {
+    WORKER_ID.get()
+}
 
 /// 网络通信错误类型
 #[derive(Error, Debug)]
@@ -36,10 +44,13 @@ impl DroneNetwork {
         let socket = ctx.socket(zmq::DEALER)?;
         socket.connect(&format!("tcp://{}:{}", queen_addr, port))?;
 
+        let id = Uuid::new_v4().to_string();
+        WORKER_ID.set(id.clone()).expect("Worker ID already set");
+        
         Ok(Self {
             socket,
             last_heartbeat: Instant::now(),
-            id: Uuid::new_v4().to_string(),
+            id,
         })
     }
 
