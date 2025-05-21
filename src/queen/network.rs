@@ -1,13 +1,11 @@
 //! 精简版网络通信模块 - 仅实现Queen端ROUTER socket
 
-use std::io;
-use std::os::windows::io::FromRawSocket;
+use std::io::{self, Read, Write};
 use std::time::Duration;
 use mio::{Events, Interest, Poll, Token};
-use mio::net::TcpStream;
+use mio::net::{TcpListener, TcpStream};
 use prost::Message;
 use thiserror::Error;
-use zmq::{Context, Socket};
 use crate::Process;
 
 use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
@@ -23,8 +21,6 @@ pub enum ProcessMessage {
 /// 网络通信错误类型
 #[derive(Error, Debug)]
 pub enum NetworkError {
-    #[error("ZMQ error: {0}")]
-    Zmq(#[from] zmq::Error),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
     #[error("Protobuf decode error: {0}")]
@@ -37,17 +33,17 @@ pub enum NetworkError {
 
 /// 网络通信核心结构体
 pub struct HiveNetwork {
-    ctx: Context,
-    socket: Socket, // ROUTER socket
+    listener: TcpListener,
     poll: Poll,
+    connections: Vec<TcpStream>,
 }
 
 impl HiveNetwork {
-    /// 获取当前连接的endpoint
+    /// 获取当前TCP监听地址
     pub fn current_endpoint(&self) -> Result<String, NetworkError> {
-        self.socket.get_last_endpoint()
-            .map(|opt| opt.unwrap_or_default())
-            .map_err(NetworkError::from)
+        self.listener.local_addr()
+            .map(|addr| addr.to_string())
+            .map_err(NetworkError::Io)
     }
 
     /// 解析原始消息为结构化数据
@@ -64,23 +60,23 @@ impl HiveNetwork {
 
     /// 创建新的网络实例
     pub fn new(bind_addr: &str, port: u16) -> Result<Self, NetworkError> {
-        let ctx = Context::new();
-        let socket = ctx.socket(zmq::ROUTER)?;
-        socket.bind(&format!("tcp://{}:{}", bind_addr, port))?;
-
-        // 初始化mio事件循环
+        let addr = format!("{}:{}", bind_addr, port).parse().map_err(|e| {
+            NetworkError::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+        })?;
+        
+        let mut listener = TcpListener::bind(addr)?;
         let poll = Poll::new()?;
-        let zmq_fd = socket.get_fd()?;
+        
         poll.registry().register(
-            &mut unsafe { TcpStream::from_raw_socket(zmq_fd) },
+            &mut listener,
             Token(0),
             Interest::READABLE,
         )?;
 
         Ok(Self {
-            ctx,
-            socket,
+            listener,
             poll,
+            connections: Vec::new(),
         })
     }
 
@@ -92,18 +88,69 @@ impl HiveNetwork {
         let mut messages = Vec::new();
 
         for event in events.iter() {
-            if event.token() == Token(0) {
-                let msg = self.socket.recv_bytes(0)?;
-                messages.push(self.parse_message(&msg)?);
+            match event.token() {
+                Token(0) => { // 新连接
+                    let (mut stream, _) = self.listener.accept()?;
+                    self.poll.registry().register(
+                        &mut stream,
+                        Token(self.connections.len() + 1),
+                        Interest::READABLE,
+                    )?;
+                    self.connections.push(stream);
+                }
+                token => { // 已有连接
+                    let idx = usize::from(token.0) - 1;
+                    if let Some(stream) = self.connections.get_mut(idx) {
+                        let mut buf = [0; 1024];
+                        
+                        // 非阻塞读取
+                        let mut retries = 0;
+                        let n = loop {
+                            match stream.read(&mut buf) {
+                                Ok(n) => break n,
+                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                    retries += 1;
+                                    if retries > 5 {
+                                        log::warn!("Max retries reached while receiving message");
+                                        break 0;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(10));
+                                    continue;
+                                }
+                                Err(e) => return Err(NetworkError::Io(e)),
+                            }
+                        };
+
+                        if n > 0 {
+                            log::debug!("Received message ({} bytes)", n);
+                            messages.push(self.parse_message(&buf[..n])?);
+                        }
+                    }
+                }
             }
         }
         Ok(messages)
     }
     /// 发送任务响应
-    pub fn send_response(&self, response: &Response) -> Result<(), NetworkError> {
+    pub fn send_response(&mut self, client_idx: usize, response: &Response) -> Result<(), NetworkError> {
         let mut buf = Vec::new();
-        response.encode(&mut buf).map_err(NetworkError::from)?;
-        self.socket.send(&buf, 0).map_err(NetworkError::from)?;
+        response.encode(&mut buf)?;
+        
+        if let Some(stream) = self.connections.get_mut(client_idx) {
+            // 非阻塞写入
+            let mut written = 0;
+            while written < buf.len() {
+                match stream.write(&buf[written..]) {
+                    Ok(n) => written += n,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(e) => return Err(NetworkError::Io(e)),
+                }
+            }
+            log::debug!("Successfully sent response ({} bytes)", buf.len());
+        }
         Ok(())
     }
 }
