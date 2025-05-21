@@ -10,8 +10,15 @@ use thiserror::Error;
 use zmq::{Context, Socket};
 use crate::Process;
 
-use super::{DronePool, RegistrationError};
 use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
+use crate::RegistrationError;
+
+/// 进程间消息枚举
+#[derive(Debug)]
+pub enum ProcessMessage {
+    Registration(Registration),
+    Heartbeat(Heartbeat),
+}
 
 /// 网络通信错误类型
 #[derive(Error, Debug)]
@@ -36,6 +43,25 @@ pub struct HiveNetwork {
 }
 
 impl HiveNetwork {
+    /// 获取当前连接的endpoint
+    pub fn current_endpoint(&self) -> Result<String, NetworkError> {
+        self.socket.get_last_endpoint()
+            .map(|opt| opt.unwrap_or_default())
+            .map_err(NetworkError::from)
+    }
+
+    /// 解析原始消息为结构化数据
+    fn parse_message(&self, data: &[u8]) -> Result<ProcessMessage, NetworkError> {
+        if let Ok(reg) = Registration::decode(data) {
+            Ok(ProcessMessage::Registration(reg))
+        } else if let Ok(hb) = Heartbeat::decode(data) {
+            Ok(ProcessMessage::Heartbeat(hb))
+        } else {
+            log::warn!("Received unknown message type ({} bytes)", data.len());
+            Err(NetworkError::Decode(prost::DecodeError::new("Unknown message type")))
+        }
+    }
+
     /// 创建新的网络实例
     pub fn new(bind_addr: &str, port: u16) -> Result<Self, NetworkError> {
         let ctx = Context::new();
@@ -51,48 +77,28 @@ impl HiveNetwork {
             Interest::READABLE,
         )?;
 
-        Ok(Self { ctx, socket, poll })
+        Ok(Self {
+            ctx,
+            socket,
+            poll,
+        })
     }
 
-    /// 处理网络事件
-    pub fn poll_events(&mut self, pool: &mut DronePool) -> Result<(), NetworkError> {
+    /// 轮询网络事件
+    /// 返回解析后的消息列表，由调用方处理业务逻辑
+    pub fn poll_events(&mut self) -> Result<Vec<ProcessMessage>, NetworkError> {
         let mut events = Events::with_capacity(128);
         self.poll.poll(&mut events, Some(Duration::from_millis(100)))?;
+        let mut messages = Vec::new();
 
         for event in events.iter() {
             if event.token() == Token(0) {
                 let msg = self.socket.recv_bytes(0)?;
-                self.handle_message(&msg, pool)?;
+                messages.push(self.parse_message(&msg)?);
             }
         }
-        Ok(())
+        Ok(messages)
     }
-
-    /// 处理接收到的消息
-    fn handle_message(&self, data: &[u8], pool: &mut DronePool) -> Result<(), NetworkError> {
-        // 优先处理注册消息
-        if let Ok(reg) = Registration::decode(data) {
-            let endpoint = self.socket.get_last_endpoint()?.unwrap_or_default();
-            let process = Process {
-                id: reg.worker_id,
-                endpoint,
-                capability: reg.capabilities,
-            };
-            pool.register_drone(process)?;
-            return Ok(());
-        }
-
-        // 其次处理心跳消息
-        if let Ok(heartbeat) = Heartbeat::decode(data) {
-            log::debug!("Received heartbeat from {}", heartbeat.worker_id);
-            return Ok(());
-        }
-
-        // 未知消息类型记录日志
-        log::warn!("Received unknown message type ({} bytes)", data.len());
-        Ok(())
-    }
-
     /// 发送任务响应
     pub fn send_response(&self, response: &Response) -> Result<(), NetworkError> {
         let mut buf = Vec::new();
@@ -101,3 +107,4 @@ impl HiveNetwork {
         Ok(())
     }
 }
+

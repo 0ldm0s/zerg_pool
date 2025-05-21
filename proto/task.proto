@@ -13,6 +13,13 @@ enum Status {
   TIMEOUT = 3;    // 超时
 }
 
+// 健康状态枚举
+enum HealthState {
+  HEALTHY = 0;
+  UNHEALTHY = 1;
+  CIRCUIT_BREAKER = 2;
+}
+
 // 任务消息定义
 message Task {
   string id = 1;          // 任务唯一ID
@@ -43,4 +50,10 @@ message Registration {
 message Heartbeat {
   string worker_id = 1;   // 工作节点ID
   int64 timestamp = 2;    // 心跳时间戳
+  HealthState state = 3;  // 健康状态
+  float cpu_usage = 4;    // CPU使用率(0-1)
+  float mem_usage = 5;    // 内存使用率(0-1)
+  uint32 net_latency = 6; // 网络延迟(ms)
+  uint32 current_tasks = 7; // 当前正在处理的任务数
+  uint32 max_tasks = 8;   // 节点最大并发任务数
 }

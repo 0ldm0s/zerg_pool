@@ -76,6 +76,24 @@ pub struct Heartbeat {
     /// 心跳时间戳
     #[prost(int64, tag = "2")]
     pub timestamp: i64,
+    /// 健康状态
+    #[prost(enumeration = "HealthState", tag = "3")]
+    pub state: i32,
+    /// CPU使用率(0-1)
+    #[prost(float, tag = "4")]
+    pub cpu_usage: f32,
+    /// 内存使用率(0-1)
+    #[prost(float, tag = "5")]
+    pub mem_usage: f32,
+    /// 网络延迟(ms)
+    #[prost(uint32, tag = "6")]
+    pub net_latency: u32,
+    /// 当前正在处理的任务数
+    #[prost(uint32, tag = "7")]
+    pub current_tasks: u32,
+    /// 节点最大并发任务数
+    #[prost(uint32, tag = "8")]
+    pub max_tasks: u32,
 }
 /// 响应状态枚举
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -111,6 +129,37 @@ impl Status {
             "FAILURE" => Some(Self::Failure),
             "PROCESSING" => Some(Self::Processing),
             "TIMEOUT" => Some(Self::Timeout),
+            _ => None,
+        }
+    }
+}
+/// 健康状态枚举
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum HealthState {
+    Healthy = 0,
+    Unhealthy = 1,
+    CircuitBreaker = 2,
+}
+impl HealthState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            HealthState::Healthy => "HEALTHY",
+            HealthState::Unhealthy => "UNHEALTHY",
+            HealthState::CircuitBreaker => "CIRCUIT_BREAKER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "HEALTHY" => Some(Self::Healthy),
+            "UNHEALTHY" => Some(Self::Unhealthy),
+            "CIRCUIT_BREAKER" => Some(Self::CircuitBreaker),
             _ => None,
         }
     }

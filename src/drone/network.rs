@@ -1,10 +1,10 @@
 //! Drone端网络通信模块 - DEALER socket实现
 
 use std::time::{Duration, Instant};
+use sysinfo::{System, CpuExt, SystemExt};
 use thiserror::Error;
 use zmq::{Context, Socket};
 use uuid::Uuid;
-use bytes::Bytes;
 
 use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
 use prost::Message;
@@ -35,6 +35,8 @@ pub struct DroneNetwork {
     socket: Socket, // DEALER socket
     last_heartbeat: Instant,
     id: String,     // Worker ID
+    sys: System,    // 系统监控
+    current_tasks: u32, // 当前任务数
 }
 
 impl DroneNetwork {
@@ -51,6 +53,8 @@ impl DroneNetwork {
             socket,
             last_heartbeat: Instant::now(),
             id,
+            sys: <System as SystemExt>::new_all(), // 完全限定路径调用
+            current_tasks: 0,
         })
     }
 
@@ -68,13 +72,23 @@ impl DroneNetwork {
         Ok(())
     }
 
-    /// 发送心跳
+    /// 发送心跳(3秒间隔)
     pub fn send_heartbeat(&mut self) -> Result<(), NetworkError> {
-        if self.last_heartbeat.elapsed() > Duration::from_secs(5) {
+        if self.last_heartbeat.elapsed() > Duration::from_secs(3) {
+            <System as SystemExt>::refresh_all(&mut self.sys);
+            
             let hb = Heartbeat {
                 worker_id: self.id.clone(),
                 timestamp: chrono::Utc::now().timestamp(),
+                state: 0, // Healthy
+                cpu_usage: <System as SystemExt>::global_cpu_info(&self.sys).cpu_usage() / 100.0,
+                mem_usage: <System as SystemExt>::used_memory(&self.sys) as f32 /
+                          <System as SystemExt>::total_memory(&self.sys) as f32,
+                net_latency: 10, // 默认值，实际由heartbeat模块计算
+                current_tasks: self.current_tasks,
+                max_tasks: thread::available_parallelism().map_or(4, |n| n.get() as u32),
             };
+            
             let mut buf = Vec::new();
             hb.encode(&mut buf)?;
             self.socket.send(&buf, 0)?;
