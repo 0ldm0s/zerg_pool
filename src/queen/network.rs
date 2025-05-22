@@ -3,11 +3,11 @@
 use std::sync::{Arc, Mutex};
 use prost::Message;
 use thiserror::Error;
-use zmq::{Context, Socket, PollItem, POLLIN};
+use zmq::{Context, Socket, POLLIN};
 
 use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
 use crate::RegistrationError;
-use crate::{ProcessMessage, proto::zergpool};
+use crate::ProcessMessage;
 
 /// 网络通信错误类型
 #[derive(Error, Debug)]

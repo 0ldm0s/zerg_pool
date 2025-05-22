@@ -3,8 +3,8 @@
 pub mod network;
 
 use std::collections::HashMap;
-use std::time::{SystemTime, Instant, Duration};
-use super::{Process, ProcessId};
+use std::time::{Instant, Duration};
+use super::Process;
 use crate::proto::zergpool::HealthState;
 
 /// 主工作池最大容量
@@ -55,7 +55,7 @@ impl DronePool {
     /// 创建新的进程池实例
     pub fn new(bind_addr: &str, port: u16) -> Result<Self, network::NetworkError> {
         println!("[DRONE POOL] 初始化网络层...");
-        let mut network = network::HiveNetwork::new(bind_addr, port)?;
+        let network = network::HiveNetwork::new(bind_addr, port)?;
         let full_addr = format!("{}:{}", bind_addr, port);
         println!("[DRONE POOL] 网络初始化完成: {}", full_addr);
         
@@ -211,11 +211,13 @@ impl DronePool {
             match message {
                 crate::ProcessMessage::Registration(reg) => {
                     println!("[REGISTRATION] 处理注册消息: {:?}", reg);
-                    let process = Process {
-                        id: reg.worker_id.clone(),
-                        capability: reg.capabilities.clone(),
-                        max_tasks: Some(reg.max_threads as u32),
-                    };
+                    let mut process = Process::new(
+                        reg.worker_id.clone(),
+                        reg.capabilities.clone(),
+                        Some(reg.max_threads as u32)
+                    );
+                    process.weight = 1.0;  // 设置默认权重
+                    process.current_load = 0.0;  // 初始化负载
                     self.register_drone(process)?;
                     println!("[REGISTRATION] 已注册工作节点: {}", reg.worker_id);
                 }

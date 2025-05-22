@@ -37,6 +37,7 @@ lazy_static = "1.4.0"
 sysinfo = "0.29"
 ping = "0.4"
 portpicker = "0.1.1"
+metrics = "0.24.2"
 
 [build-dependencies]
 prost-build = "0.11"
@@ -52,7 +53,17 @@ criterion = "0.4"
 log = "0.4"
 env_logger = "0.10"
 approx = "0.5"
+proptest = "1.4"
+cargo-tarpaulin = "0.27"
 
 [[test]]
 name = "load_balancer"
 path = "tests/load_balancer.rs"
+
+[[test]]
+name = "balancer_integration"
+path = "tests/balancer_test.rs"
+
+[[bench]]
+name = "balancer"
+path = "benches/balancer_bench.rs"

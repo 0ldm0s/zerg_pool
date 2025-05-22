@@ -6,9 +6,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
-use crate::proto::zergpool::{Task, Response, response};
+use crate::proto::zergpool::{Task, Response};
 use crate::drone::network::NetworkError;
-use log::warn;
 
 /// 任务队列配置
 const QUEUE_CAPACITY: usize = 1000;

@@ -14,6 +14,21 @@ pub struct Process {
     pub id: ProcessId,
     pub capability: Vec<String>,
     pub max_tasks: Option<u32>, // 可选的最大任务数
+    pub weight: f64,
+    pub current_load: f64,
+}
+
+impl Process {
+    /// 创建新进程实例
+    pub fn new(id: ProcessId, capability: Vec<String>, max_tasks: Option<u32>) -> Self {
+        Self {
+            id,
+            capability,
+            max_tasks,
+            weight: 1.0,
+            current_load: 0.0,
+        }
+    }
 }
 
 /// 进程间通信消息类型(严格匹配proto/task.proto定义)
@@ -68,4 +83,5 @@ pub use queen::DronePool;
 pub use drone::heartbeat::HeartbeatManager;
 pub use drone::network::DroneNetwork;
 pub use queen::network::HiveNetwork;
+
 
