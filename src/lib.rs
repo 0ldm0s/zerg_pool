@@ -1,7 +1,7 @@
 //! ZergPool 核心库入口 - 严格遵循docs/架构设计.md规范
 
-mod queen;
-mod drone;
+pub mod queen;
+pub mod drone;
 pub mod proto;
 pub mod balancer;
 
@@ -14,6 +14,22 @@ pub struct Process {
     pub id: ProcessId,
     pub capability: Vec<String>,
     pub max_tasks: Option<u32>, // 可选的最大任务数
+}
+
+/// 进程间通信消息类型(严格匹配proto/task.proto定义)
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum ProcessMessage {
+    /// 工作节点注册消息(对应proto Registration消息)
+    Registration(proto::zergpool::Registration),
+    
+    /// 心跳消息(对应proto Heartbeat消息)
+    Heartbeat(proto::zergpool::Heartbeat),
+    
+    /// 任务消息(对应proto Task消息)
+    Task(proto::zergpool::Task),
+    
+    /// 任务响应消息(对应proto Response消息)
+    TaskResponse(proto::zergpool::Response),
 }
 
 use crate::queen::network::NetworkError;
@@ -52,3 +68,4 @@ pub use queen::DronePool;
 pub use drone::heartbeat::HeartbeatManager;
 pub use drone::network::DroneNetwork;
 pub use queen::network::HiveNetwork;
+

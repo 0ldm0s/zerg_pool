@@ -54,9 +54,14 @@ pub struct WorkerStatus {
 impl DronePool {
     /// 创建新的进程池实例
     pub fn new(bind_addr: &str, port: u16) -> Result<Self, network::NetworkError> {
+        println!("[DRONE POOL] 初始化网络层...");
+        let mut network = network::HiveNetwork::new(bind_addr, port)?;
+        let full_addr = format!("{}:{}", bind_addr, port);
+        println!("[DRONE POOL] 网络初始化完成: {}", full_addr);
+        
         Ok(Self {
             state: Arc::new(Mutex::new(PoolState::new())),
-            network: network::HiveNetwork::new(bind_addr, port)?,
+            network,
         })
     }
 
@@ -80,6 +85,7 @@ impl DronePool {
 
     /// 注册新的工作节点
     pub fn register_drone(&mut self, drone: super::Process) -> Result<(), network::NetworkError> {
+        println!("[REGISTER DRONE] 注册新工作节点: {}", drone.id);
         let need_update = self.with_state_mut(|state| {
             state.status.insert(drone.id.clone(), WorkerStatus {
                 last_heartbeat: Instant::now(),
@@ -195,19 +201,25 @@ impl DronePool {
 
     /// 轮询并处理网络事件
     pub fn poll_events(&mut self) -> Result<(), network::NetworkError> {
+        println!("[POLL EVENTS] 开始轮询网络事件...");
         let messages = self.network.poll_events()?;
+        println!("[POLL EVENTS] 收到 {} 条消息", messages.len());
         
-        for message in messages {
+        for (identity, message) in messages {
+            println!("[POLL EVENTS] 处理消息 - 来源: {}, 类型: {:?}", identity, message);
+            log::debug!("收到消息 - 来源: {}, 类型: {:?}", identity, message);
             match message {
-                network::ProcessMessage::Registration(reg) => {
+                crate::ProcessMessage::Registration(reg) => {
+                    println!("[REGISTRATION] 处理注册消息: {:?}", reg);
                     let process = Process {
-                        id: reg.worker_id,
-                        capability: reg.capabilities,
+                        id: reg.worker_id.clone(),
+                        capability: reg.capabilities.clone(),
                         max_tasks: Some(reg.max_threads as u32),
                     };
                     self.register_drone(process)?;
+                    println!("[REGISTRATION] 已注册工作节点: {}", reg.worker_id);
                 }
-                network::ProcessMessage::Heartbeat(hb) => {
+                crate::ProcessMessage::Heartbeat(hb) => {
                     self.update_worker_metrics(
                         &hb.worker_id,
                         hb.cpu_usage,
@@ -221,6 +233,7 @@ impl DronePool {
                         log::warn!("发现不健康节点: {:?}", unhealthy);
                     }
                 }
+                _ => {} // 忽略其他消息类型
             }
         }
         Ok(())

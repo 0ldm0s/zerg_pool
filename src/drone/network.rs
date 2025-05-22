@@ -2,11 +2,13 @@
 
 use std::time::{Duration, Instant};
 use sysinfo::{System, CpuExt, SystemExt};
+use bincode;
 use thiserror::Error;
 use zmq::{Context, Socket};
 use uuid::Uuid;
 
 use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
+use crate::ProcessMessage;
 use prost::Message;
 use std::env;
 use std::thread;
@@ -28,6 +30,8 @@ pub enum NetworkError {
     Decode(#[from] prost::DecodeError),
     #[error("Protobuf encode error: {0}")]
     Encode(#[from] prost::EncodeError),
+    #[error("Serialization error: {0}")]
+    Serialize(#[from] Box<bincode::ErrorKind>),
 }
 
 /// Drone网络连接
@@ -60,14 +64,14 @@ impl DroneNetwork {
 
     /// 发送注册消息
     pub fn register(&self, worker_id: &str, capabilities: Vec<String>) -> Result<(), NetworkError> {
-        let reg = Registration {
+        let reg = ProcessMessage::Registration(Registration {
             worker_id: worker_id.to_string(),
             max_threads: thread::available_parallelism().map_or(4, |n| n.get() as i32),
             version: env!("CARGO_PKG_VERSION").to_string(),
             capabilities,
-        };
+        });
         let mut buf = Vec::new();
-        reg.encode(&mut buf)?;
+        bincode::serialize_into(&mut buf, &reg)?;
         self.socket.send(&buf, 0)?;
         Ok(())
     }
@@ -77,7 +81,7 @@ impl DroneNetwork {
         if self.last_heartbeat.elapsed() > Duration::from_secs(3) {
             <System as SystemExt>::refresh_all(&mut self.sys);
             
-            let hb = Heartbeat {
+            let hb = ProcessMessage::Heartbeat(Heartbeat {
                 worker_id: self.id.clone(),
                 timestamp: chrono::Utc::now().timestamp(),
                 state: 0, // Healthy
@@ -87,10 +91,10 @@ impl DroneNetwork {
                 net_latency: 10, // 默认值，实际由heartbeat模块计算
                 current_tasks: self.current_tasks,
                 max_tasks: thread::available_parallelism().map_or(4, |n| n.get() as u32),
-            };
+            });
             
             let mut buf = Vec::new();
-            hb.encode(&mut buf)?;
+            bincode::serialize_into(&mut buf, &hb)?;
             self.socket.send(&buf, 0)?;
             self.last_heartbeat = Instant::now();
         }
@@ -100,7 +104,11 @@ impl DroneNetwork {
     /// 接收任务
     pub fn recv_task(&self) -> Result<Option<Task>, NetworkError> {
         if let Ok(msg) = self.socket.recv_bytes(0) {
-            Ok(Some(Task::decode(&*msg)?))
+            if let ProcessMessage::Task(task) = bincode::deserialize(&msg)? {
+                Ok(Some(task))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -108,8 +116,9 @@ impl DroneNetwork {
 
     /// 发送任务结果
     pub fn send_response(&self, response: &Response) -> Result<(), NetworkError> {
+        let msg = ProcessMessage::TaskResponse(response.clone());
         let mut buf = Vec::new();
-        response.encode(&mut buf)?;
+        bincode::serialize_into(&mut buf, &msg)?;
         self.socket.send(&buf, 0)?;
         Ok(())
     }
