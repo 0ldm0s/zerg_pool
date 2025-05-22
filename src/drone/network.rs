@@ -62,26 +62,31 @@ impl DroneNetwork {
         })
     }
 
-    /// 发送注册消息
+    /// 发送注册消息(四帧格式)
     pub fn register(&self, worker_id: &str, capabilities: Vec<String>) -> Result<(), NetworkError> {
-        let reg = ProcessMessage::Registration(Registration {
+        let reg = Registration {
             worker_id: worker_id.to_string(),
             max_threads: thread::available_parallelism().map_or(4, |n| n.get() as i32),
             version: env!("CARGO_PKG_VERSION").to_string(),
             capabilities,
-        });
+        };
         let mut buf = Vec::new();
-        bincode::serialize_into(&mut buf, &reg)?;
-        self.socket.send(&buf, 0)?;
+        reg.encode(&mut buf)?;
+        println!("[DRONE NET] 发送注册消息: {}字节", buf.len());
+        
+        // 三帧格式: 两空帧 + 数据帧 (ROUTER会自动添加身份帧)
+        self.socket.send("", zmq::SNDMORE)?; // 空帧1
+        self.socket.send("", zmq::SNDMORE)?; // 空帧2
+        self.socket.send(&buf, 0)?; // 数据帧
         Ok(())
     }
 
-    /// 发送心跳(3秒间隔)
+    /// 发送心跳(3秒间隔, 四帧格式)
     pub fn send_heartbeat(&mut self) -> Result<(), NetworkError> {
         if self.last_heartbeat.elapsed() > Duration::from_secs(3) {
             <System as SystemExt>::refresh_all(&mut self.sys);
             
-            let hb = ProcessMessage::Heartbeat(Heartbeat {
+            let hb = Heartbeat {
                 worker_id: self.id.clone(),
                 timestamp: chrono::Utc::now().timestamp(),
                 state: 0, // Healthy
@@ -91,11 +96,16 @@ impl DroneNetwork {
                 net_latency: 10, // 默认值，实际由heartbeat模块计算
                 current_tasks: self.current_tasks,
                 max_tasks: thread::available_parallelism().map_or(4, |n| n.get() as u32),
-            });
+            };
             
             let mut buf = Vec::new();
-            bincode::serialize_into(&mut buf, &hb)?;
-            self.socket.send(&buf, 0)?;
+            hb.encode(&mut buf)?;
+            println!("[DRONE NET] 发送心跳: {}字节", buf.len());
+            
+            // 三帧格式: 两空帧 + 数据帧 (ROUTER会自动添加身份帧)
+            self.socket.send("", zmq::SNDMORE)?; // 空帧1
+            self.socket.send("", zmq::SNDMORE)?; // 空帧2
+            self.socket.send(&buf, 0)?; // 数据帧
             self.last_heartbeat = Instant::now();
         }
         Ok(())
@@ -114,12 +124,16 @@ impl DroneNetwork {
         }
     }
 
-    /// 发送任务结果
+    /// 发送任务结果(四帧格式)
     pub fn send_response(&self, response: &Response) -> Result<(), NetworkError> {
-        let msg = ProcessMessage::TaskResponse(response.clone());
         let mut buf = Vec::new();
-        bincode::serialize_into(&mut buf, &msg)?;
-        self.socket.send(&buf, 0)?;
+        response.encode(&mut buf)?;
+        println!("[DRONE NET] 发送响应: {}字节", buf.len());
+        
+        // 三帧格式: 两空帧 + 数据帧 (ROUTER会自动添加身份帧)
+        self.socket.send("", zmq::SNDMORE)?; // 空帧1
+        self.socket.send("", zmq::SNDMORE)?; // 空帧2
+        self.socket.send(&buf, 0)?; // 数据帧
         Ok(())
     }
 }

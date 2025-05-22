@@ -1,24 +1,17 @@
-//! 集成mio+zmq+Protobuf的网络通信模块
+//! 纯zmq+Protobuf的网络通信模块
 
-use std::io;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use mio::{Events, Interest, Poll, Token};
 use prost::Message;
 use thiserror::Error;
-use zmq::{Context, Socket};
+use zmq::{Context, Socket, PollItem, POLLIN};
 
 use crate::proto::zergpool::{Heartbeat, Registration, Response, Task};
 use crate::RegistrationError;
-
-/// 进程间消息枚举
 use crate::{ProcessMessage, proto::zergpool};
 
 /// 网络通信错误类型
 #[derive(Error, Debug)]
 pub enum NetworkError {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
     #[error("Protobuf decode error: {0}")]
     Decode(#[from] prost::DecodeError),
     #[error("Protobuf encode error: {0}")]
@@ -33,7 +26,6 @@ pub enum NetworkError {
 pub struct HiveNetwork {
     zmq_ctx: Context,
     zmq_socket: Socket,
-    poll: Poll,
     should_exit: Arc<Mutex<bool>>,
 }
 
@@ -54,42 +46,11 @@ impl HiveNetwork {
         zmq_socket.bind(&full_addr)?;
         println!("[NETWORK] 成功绑定到 {}", full_addr);
 
-        let poll = Poll::new()?;
         let should_exit = Arc::new(Mutex::new(false));
-
-        // 获取zmq的socket描述符并注册到mio
-        let zmq_fd = zmq_socket.get_fd()?;
-        println!("[NETWORK DEBUG] ZMQ文件描述符: {}", zmq_fd);
-        println!("[NETWORK DEBUG] ZMQ套接字类型: ROUTER");
-        println!("[NETWORK DEBUG] ZMQ套接字状态: {:?}", zmq_socket.get_socket_state());
-        println!("[NETWORK DEBUG] mio轮询器初始化完成");
-        
-        #[cfg(windows)] {
-            use std::os::windows::io::FromRawSocket;
-            use std::net::TcpStream;
-            let std_socket = unsafe { TcpStream::from_raw_socket(zmq_fd as _) };
-            let mut mio_socket = mio::net::TcpStream::from_std(std_socket);
-            poll.registry().register(
-                &mut mio_socket,
-                Token(0),
-                Interest::READABLE,
-            )?;
-        }
-
-        #[cfg(unix)] {
-            use std::os::unix::io::FromRawFd;
-            let mut mio_socket = unsafe { mio::net::TcpStream::from_raw_fd(zmq_fd as _) };
-            poll.registry().register(
-                &mut mio_socket,
-                Token(0),
-                Interest::READABLE,
-            )?;
-        }
 
         Ok(Self {
             zmq_ctx,
             zmq_socket,
-            poll,
             should_exit,
         })
     }
@@ -102,7 +63,6 @@ impl HiveNetwork {
             Ok(Err(e)) => {
                 let err_msg = String::from_utf8_lossy(&e);
                 log::error!("ZMQ endpoint error: {}", err_msg);
-                // 使用zmq内置的EINVAL错误
                 Err(NetworkError::Zmq(zmq::Error::EINVAL))
             },
             Err(e) => {
@@ -111,6 +71,7 @@ impl HiveNetwork {
             }
         }
     }
+
     /// 解析原始消息为结构化数据
     fn parse_message(&self, data: &[u8]) -> Result<ProcessMessage, NetworkError> {
         if let Ok(reg) = Registration::decode(data) {
@@ -124,67 +85,55 @@ impl HiveNetwork {
         }
     }
 
-    /// 轮询网络事件
+    /// 轮询网络事件(单次轮询)
     pub fn poll_events(&mut self) -> Result<Vec<(String, ProcessMessage)>, NetworkError> {
-        println!("[NETWORK POLL] 开始轮询ZMQ事件...");
-        println!("[NETWORK DEBUG] 当前ZMQ套接字状态: {:?}", self.zmq_socket.get_socket_state());
-        let mut events = Events::with_capacity(128);
-        self.poll.poll(&mut events, Some(Duration::from_millis(100)))?;
-        println!("[NETWORK POLL] 检测到 {} 个事件", events.iter().count());
-        println!("[NETWORK DEBUG] mio注册状态: 轮询完成");
-        println!("[NETWORK DEBUG] 当前ZMQ套接字状态: {:?}", self.zmq_socket.get_socket_state());
         let mut messages = Vec::new();
+        let mut poll_items = [self.zmq_socket.as_poll_item(POLLIN)];
 
-        for event in events.iter() {
-            if event.is_readable() {
-                println!("[NETWORK POLL] 处理可读事件");
-                let identity = match self.zmq_socket.recv_string(0) {
-                    Ok(Ok(s)) => {
-                        println!("[NETWORK RECV] 收到身份帧: {}", s);
-                        s
-                    },
-                    Ok(Err(e)) => {
-                        println!("[NETWORK ERROR] 身份帧接收错误: {:?}", e);
-                        continue
-                    },
-                    Err(e) => {
-                        println!("[NETWORK ERROR] ZMQ接收错误: {}", e);
-                        continue
-                    },
-                };
-                println!("[NETWORK DEBUG] 准备接收消息体...");
-                let msg_data = self.zmq_socket.recv_bytes(0)?;
-                println!("[NETWORK DEBUG] 实际接收字节数: {}", msg_data.len());
-                println!("[NETWORK RECV] 收到消息 - 来源: {}, 长度: {} 字节", identity, msg_data.len());
-                
-                match self.parse_message(&msg_data) {
-                    Ok(msg) => {
-                        println!("[NETWORK] 成功解析消息: {:?}", msg);
-                        messages.push((identity, msg))
-                    },
-                    Err(e) => {
-                        println!("[NETWORK] 消息解析失败: {}", e);
-                        log::warn!("Failed to parse message: {}", e)
-                    },
-                }
+        // 单次轮询，超时100ms
+        zmq::poll(&mut poll_items, 100)?;
+
+        if poll_items[0].is_readable() {
+            println!("[NETWORK TRACE] 检测到可读事件");
+            
+            // 使用recv_multipart一次性接收所有帧
+            let frames = self.zmq_socket.recv_multipart(0)?;
+            
+            // 验证四帧消息格式
+            if frames.len() != 4 {
+                log::warn!("消息格式错误：期望4帧，实际收到{}帧", frames.len());
+                return Ok(messages);
+            }
+            
+            // 解析身份帧
+            let identity = String::from_utf8_lossy(&frames[0]).to_string();
+            println!("[NETWORK TRACE] 收到身份帧: {}", identity);
+            
+            // 验证空帧
+            if !frames[1].is_empty() || !frames[2].is_empty() {
+                log::warn!("消息格式错误：空帧非空");
+                return Ok(messages);
+            }
+            
+            // 处理数据帧
+            println!("[NETWORK TRACE] 收到数据帧: {}字节", frames[3].len());
+            match self.parse_message(&frames[3]) {
+                Ok(msg) => messages.push((identity, msg)),
+                Err(e) => log::warn!("消息解析失败: {}", e),
             }
         }
-
         Ok(messages)
     }
 
-    /// 发送响应消息
+    /// 发送响应消息(优化日志)
     pub fn send_response(&mut self, identity: &str, response: &Response) -> Result<(), NetworkError> {
-        println!("[NETWORK SEND] 准备发送响应给: {}", identity);
         let mut buf = Vec::new();
         response.encode(&mut buf)?;
         
-        println!("[NETWORK SEND] 发送身份帧: {} 字节", identity.as_bytes().len());
         self.zmq_socket.send(identity.as_bytes(), zmq::SNDMORE)?;
-        println!("[NETWORK SEND] 发送消息体: {} 字节", buf.len());
         self.zmq_socket.send(&buf, 0)?;
-        println!("[NETWORK SEND] 消息发送完成");
         
+        log::debug!("已发送响应给 {} ({}字节)", identity, buf.len());
         Ok(())
     }
 
