@@ -28,34 +28,14 @@ fn test_drone_pool_with_zmq() {
         }
     });
 
-    // 创建测试客户端(DEALER套接字)
-    let ctx = Context::new();
-    let client = ctx.socket(zmq::DEALER).unwrap();
-    let identity = "test-drone-1";
-    client.set_identity(identity.as_bytes()).unwrap();
-    println!("[CLIENT] 正在连接服务端...");
-    client.connect("tcp://127.0.0.1:5555").unwrap();
-
-    // 准备注册消息
-    let reg = Registration {
-        worker_id: identity.to_string(),
-        capabilities: vec!["compute".to_string()],
-        max_threads: 4,
-        version: "1.0.0".to_string(),
-    };
-    let mut msg_data = Vec::new();
-    reg.encode(&mut msg_data).unwrap();
-
-    // 严格按照queen/network.rs要求的四帧格式发送
-    // 1. 身份帧(DEALER会自动添加)
-    // 2. 空帧1
-    // 3. 空帧2 
-    // 4. 数据帧
-    println!("[CLIENT] 发送四帧格式注册消息...");
-    client.send("", zmq::SNDMORE).unwrap(); // 空帧1
-    client.send("", zmq::SNDMORE).unwrap(); // 空帧2
-    client.send(&msg_data, 0).unwrap(); // 数据帧
-    println!("[CLIENT] 消息发送完成 ({}字节)", msg_data.len());
+    // 使用DroneNetwork进行注册(与生产环境完全一致)
+    let mut drone_net = zerg_pool::drone::network::DroneNetwork::connect("127.0.0.1", 5555)
+        .expect("创建DroneNetwork失败");
+    
+    println!("[CLIENT] 使用DroneNetwork进行注册...");
+    drone_net.register("test-drone-1", vec!["compute".to_string()])
+        .expect("注册失败");
+    println!("[CLIENT] 注册消息已发送");
 
     // 验证注册结果
     let mut retries = 10;
@@ -73,5 +53,4 @@ fn test_drone_pool_with_zmq() {
     }
 
     assert!(registered, "工作节点注册失败");
-    client.disconnect("tcp://127.0.0.1:5555").unwrap();
 }
