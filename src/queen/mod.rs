@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::{Instant, Duration};
 use super::Process;
 use crate::proto::zergpool::HealthState;
+use crate::balancer::{ZergRushSelector, SelectorError};
 
 /// 主工作池最大容量
 const MAX_MAIN_POOL_SIZE: usize = 10;
@@ -15,8 +16,8 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 struct PoolState {
-    workers: Vec<super::Process>,
-    backup_drones: Vec<super::Process>,
+    workers: Vec<Arc<super::Process>>,
+    backup_drones: Vec<Arc<super::Process>>,
     status: HashMap<super::ProcessId, WorkerStatus>,
 }
 
@@ -100,10 +101,10 @@ impl DronePool {
             });
 
             if state.workers.len() < MAX_MAIN_POOL_SIZE {
-                state.workers.push(drone);
+                state.workers.push(Arc::new(drone));
                 true
             } else {
-                state.backup_drones.push(drone);
+                state.backup_drones.push(Arc::new(drone));
                 false
             }
         });
@@ -121,7 +122,59 @@ impl DronePool {
 
     /// 更新负载均衡策略
     fn update_balancer_strategy(&mut self) {
-        // 实际实现中这里会调用负载均衡算法
+        // 初始化选择器(负载阈值80%，预热时间5秒)
+        let selector = ZergRushSelector::new(0.8, Duration::from_secs(5));
+        
+        let result = self.with_state_mut(|state| {
+            // 收集节点负载数据
+            let nodes: Vec<_> = state.workers.iter()
+                .map(|worker| {
+                    let status = state.status.get(&worker.id).unwrap();
+                    let load = 0.6 * status.cpu_usage as f64 +
+                              0.3 * status.mem_usage as f64 +
+                              0.1 * (status.net_latency as f64 / 1000.0);
+                    (worker.as_ref(), load)
+                })
+                .collect();
+
+            // 记录metrics
+            metrics::gauge!("zergpool.worker_count").set(nodes.len() as f64);
+            
+            // 选择节点并获取负载
+            let selected = selector.select(&nodes)?;
+            let selected_id = selected.id.clone();
+            let load = nodes.iter()
+                .find(|(w, _)| w.id == selected_id)
+                .map(|(_, l)| *l)
+                .unwrap_or(0.0);
+            
+            log::info!("选择工作节点: {}, 负载: {:.2}", selected_id, load);
+            Ok((selected_id, load))
+        });
+
+        match result {
+            Ok((_selected, _load)) => {
+                metrics::counter!("zergpool.selections").increment(1);
+            }
+            Err(SelectorError::NoNodesAvailable) => {
+                log::warn!("没有可用工作节点，尝试使用备用节点");
+                self.with_state_mut(|state| {
+                    if !state.backup_drones.is_empty() {
+                        let backup = state.backup_drones.remove(0);
+                        metrics::counter!("zergpool.backup_used").increment(1);
+                        log::info!("已从备用池激活节点: {}", backup.id);
+                        state.workers.push(backup);
+                    } else {
+                        log::error!("备用节点池已耗尽!");
+                        metrics::counter!("zergpool.backup_empty").increment(1);
+                    }
+                });
+            }
+            Err(e) => {
+                log::error!("负载均衡选择失败: {}", e);
+                metrics::counter!("zergpool.selection_errors").increment(1);
+            }
+        }
     }
     
     /// 更新节点状态指标(与drone端心跳消息对齐)
