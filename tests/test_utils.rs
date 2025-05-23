@@ -24,7 +24,7 @@ impl TestSelectorBuilder {
     }
 
     pub async fn build(self) -> ZergRushSelector {
-        let mut selector = ZergRushSelector::new(self.max_load, self.warmup);
+        let mut selector = ZergRushSelector::new(self.max_load, self.warmup, Duration::from_secs(5));
         for node in self.backup_nodes {
             selector.scale_in(&mut vec![node]).await.unwrap();
         }

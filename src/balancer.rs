@@ -98,12 +98,6 @@ impl BackupPool {
     }
 }
 
-/// Zerg Rush算法选择器
-#[derive(Debug)]
-pub struct ZergRushSelector {
-    max_load_threshold: f64,
-    backup_pool: BackupPool,
-}
 
 #[derive(Debug, Error)]
 pub enum SelectorError {
@@ -121,17 +115,44 @@ pub enum ScaleError {
     MigrationTimeout,
 }
 
+/// Zerg Rush算法选择器
+#[derive(Debug)]
+pub struct ZergRushSelector {
+    /// 总任务数统计
+    total_tasks: u64,
+    /// 总耗时统计(毫秒)
+    total_duration: u64,
+    /// 最大负载阈值
+    max_load_threshold: f64,
+    /// 健康检查间隔
+    check_interval: Duration,
+    /// 备用进程池
+    backup_pool: BackupPool,
+}
+
 impl ZergRushSelector {
     /// 创建新选择器
-    /// 
+    ///
     /// # 参数
-    /// - max_load_threshold: 最大负载阈值(0-100)
+    /// - max_load_threshold: 最大负载阈值(0.0-1.0)
+    /// - check_interval: 健康检查间隔
     /// - warmup_duration: 节点预热时长
-    pub fn new(max_load_threshold: f64, warmup_duration: Duration) -> Self {
+    pub fn new(max_load_threshold: f64, check_interval: Duration, warmup_duration: Duration) -> Self {
+        // 初始化健康检查指标
+        gauge!("zergpool.healthcheck_interval").set(check_interval.as_secs_f64());
         Self {
+            total_tasks: 0,
+            total_duration: 0,
             max_load_threshold,
+            check_interval,
             backup_pool: BackupPool::new(warmup_duration),
         }
+    }
+
+    /// 任务完成回调
+    pub fn on_task_completed(&mut self, duration: std::time::Duration) {
+        self.total_tasks += 1;
+        self.total_duration += duration.as_millis() as u64;
     }
 
     /// 选择最优节点
@@ -204,5 +225,13 @@ impl ZergRushSelector {
         self.backup_pool.add_node(node);
         counter!("zergpool.scale_in").increment(1);
         Ok(())
+    }
+
+    /// 任务提交通知
+    ///
+    /// 当有新任务提交时调用，用于触发负载均衡决策
+    pub fn on_task_submitted(&mut self) {
+        counter!("zergpool.tasks_submitted").increment(1);
+        // 后续可在此处添加自动扩容逻辑
     }
 }

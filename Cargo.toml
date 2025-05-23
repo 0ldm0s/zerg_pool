@@ -38,6 +38,7 @@ sysinfo = "0.29"
 ping = "0.4"
 portpicker = "0.1.1"
 metrics = "0.24.2"
+prometheus = "0.14.0"
 
 [build-dependencies]
 prost-build = "0.11"

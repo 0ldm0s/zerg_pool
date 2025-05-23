@@ -20,7 +20,11 @@ fn test_nodes(count: usize) -> Vec<Process> {
 
 pub fn bench_node_selection(c: &mut Criterion) {
     let nodes = test_nodes(100);
-    let selector = ZergRushSelector::new(0.8, Duration::from_secs(5));
+    let selector = ZergRushSelector::new(
+        0.8,    // max_load_threshold
+        Duration::from_secs(1),  // check_interval (seconds)
+        Duration::from_secs(5),  // warmup_duration (seconds)
+    );
     let weighted_nodes = nodes.iter().map(|n| (n, 0.5)).collect::<Vec<_>>();
 
     c.bench_function("select from 100 nodes", |b| {
@@ -30,9 +34,9 @@ pub fn bench_node_selection(c: &mut Criterion) {
     });
 }
 
-criterion_group!{
+criterion_group! {
     name = benches;
-    config = Criterion::default();
+    config = ::criterion::Criterion::default();
     targets = bench_node_selection
 }
 criterion_main!(benches);

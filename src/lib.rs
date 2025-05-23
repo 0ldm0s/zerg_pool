@@ -1,9 +1,10 @@
 //! ZergPool 核心库入口 - 严格遵循docs/架构设计.md规范
 
-pub mod queen;
-pub mod drone;
-pub mod proto;
 pub mod balancer;
+pub mod drone;
+pub mod engine;
+pub mod proto;
+pub mod queen;
 
 /// 进程标识类型
 pub type ProcessId = String;
@@ -82,6 +83,7 @@ pub type Result<T> = std::result::Result<T, PoolError>;
 pub use queen::DronePool;
 pub use drone::heartbeat::HeartbeatManager;
 pub use drone::network::DroneNetwork;
+pub use engine::TaskEngine;
 pub use queen::network::HiveNetwork;
 
 

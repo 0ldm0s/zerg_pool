@@ -123,7 +123,7 @@ impl DronePool {
     /// 更新负载均衡策略
     fn update_balancer_strategy(&mut self) {
         // 初始化选择器(负载阈值80%，预热时间5秒)
-        let selector = ZergRushSelector::new(0.8, Duration::from_secs(5));
+        let selector = ZergRushSelector::new(0.8, Duration::from_secs(5), Duration::from_secs(5));
         
         let result = self.with_state_mut(|state| {
             // 收集节点负载数据

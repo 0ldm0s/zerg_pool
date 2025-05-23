@@ -33,7 +33,7 @@ mod scenarios {
     
     #[test]
     fn test_zerg_rush_selection() {
-        let selector = ZergRushSelector::new(80.0, Duration::from_secs(1));
+        let selector = ZergRushSelector::new(80.0, Duration::from_secs(1), Duration::from_secs(5));
         let nodes = vec![
             test_utils::new_test_process("node1".into()),
             test_utils::new_test_process("node2".into()),
@@ -75,7 +75,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         })
     });
     
-    let selector = ZergRushSelector::new(80.0, Duration::from_secs(1));
+    let selector = ZergRushSelector::new(80.0, Duration::from_secs(1), Duration::from_secs(5));
     let node1 = test_utils::new_test_process("node1".into());
     let node2 = test_utils::new_test_process("node2".into());
     let nodes = &[
